@@ -1151,6 +1151,16 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
+    if isinstance(example_value, torch.Size):
+        # tree_map destroys the torch.Size and then we can't match up the
+        # types
+        node.meta["example_value_snapshot"] = example_value
+    else:
+        node.meta["example_value_snapshot"] = pytree.tree_map_only(
+            torch.Tensor,
+            lambda x: torch.fx.experimental.symbolic_shapes._TensorSnapshot(x.shape),
+            example_value,
+        )
 
 
 def _get_fake_tensor(vt):
