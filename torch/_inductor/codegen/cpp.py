@@ -1398,6 +1398,7 @@ class CppVecOverrides(CppOverrides):
     def to_dtype(x, dtype, src_dtype=None):
         assert dtype in [
             torch.bool,
+            torch.float64,
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -2436,7 +2437,7 @@ class CppVecKernel(CppKernel):
             "welford_combine",
         }
         assert dtype == src_dtype
-        assert dtype in [torch.float, torch.int64]
+        assert dtype in [torch.float64, torch.float, torch.int64]
         assert isinstance(value, CppCSEVariable), value
 
         if not value.is_vec:
@@ -2501,8 +2502,8 @@ class CppVecKernel(CppKernel):
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
                 assert (
-                    self._get_num_vectors(dtype) == 1
-                ), "Welford reduction does not support VectorizedN (N>1)"
+                    self._get_num_vectors(dtype) in [1, 2]
+                ), "Welford reduction does not support VectorizedN (N>2)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -2843,6 +2844,7 @@ class CppVecKernelChecker(CppVecKernel):
 
         # Cache all the load result
         self.supported_dtypes: List[torch.dtype] = [
+            torch.float64,
             torch.float,
             torch.bfloat16,
             torch.float16,
@@ -2908,6 +2910,7 @@ class CppVecKernelChecker(CppVecKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         if not (
             (dtype == torch.float and src_dtype == torch.float)
+            or (dtype == torch.double and src_dtype == torch.double)
             or (dtype == torch.int64 and src_dtype == torch.int64)
             and reduction_type in VECTORIZABLE_RTYPES
         ):
@@ -2983,8 +2986,8 @@ class CppVecKernelChecker(CppVecKernel):
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
                     # VecKernel override dtype for constant
-                    # Vectorization only support int32/fp32 now
-                    # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
+                    # Vectorization only support int32 now
+                    # So if dtype = int64, we will cast it to int32 if possible
                     i32_iinfo = torch.iinfo(torch.int32)
                     if (
                         dtype == torch.int64
@@ -2996,15 +2999,6 @@ class CppVecKernelChecker(CppVecKernel):
                         )
                     ):
                         opt_ctx.dtype = torch.int32
-
-                    f32_iinfo = torch.finfo(torch.float32)
-                    if dtype == torch.double:
-                        if (
-                            (val <= f32_iinfo.max and val >= f32_iinfo.min)
-                            or (val == torch.inf)
-                            or (val == -torch.inf)
-                        ):
-                            opt_ctx.dtype = torch.float32
 
                     if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
