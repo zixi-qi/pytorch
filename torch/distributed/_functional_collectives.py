@@ -276,8 +276,12 @@ def reduce_scatter_tensor(
         self.size(scatter_dim) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = (
+            self.unflatten(scatter_dim, (group_size, -1))
+            .movedim(scatter_dim, 0)
+            .contiguous()
+            .flatten(0, 1)
+        )
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
