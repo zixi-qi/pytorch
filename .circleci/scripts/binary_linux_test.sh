@@ -71,6 +71,9 @@ if [[ "\$PYTORCH_BUILD_VERSION" == *dev* ]]; then
 else
     CHANNEL="test"
 fi
+echo "the value of use split build is"
+echo "$USE_SPLIT_BUILD"
+ls -1 /final_pkgs/torch_no_python* | sort |tail -1
 
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
