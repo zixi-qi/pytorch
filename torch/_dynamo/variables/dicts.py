@@ -175,6 +175,10 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
+    def len(self):
+        # TODO(anijain2305) - Exclude the DeletedVariable.
+        return len(self.items)
+
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:

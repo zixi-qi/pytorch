@@ -837,6 +837,44 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             initialize_lazy_module(tx, mod, args, kwargs)
         name = "_call_impl"
         fn = getattr(self.value_type, name)
+
+        from torch.nn.utils.parametrize import is_parametrized
+
+        if (
+            not tx.output.side_effects.has_pending_mutation(self)
+            and "forward" not in mod.__dict__
+            and not is_parametrized(mod)
+            and fn is torch.nn.Module._call_impl
+        ):
+            forward_method = inspect.getattr_static(mod, "forward")
+            if isinstance(forward_method, types.FunctionType):
+                # TODO(anijain2305) - Load this once - should give ~3 seconds on MobileBert
+                import importlib
+
+                module_name = "torch.nn.modules.module"
+                module_source = tx.import_source(module_name)
+                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                from .builder import VariableBuilder
+
+                globals_vt = VariableBuilder(tx, module_source)(fglobals_value)
+
+                if not tx.output.side_effects.has_pending_mutation(globals_vt):
+                    # Check if we can take the fast path of directly tracing forward.
+                    if not (
+                        self.var_getattr(tx, "_backward_hooks").realize().len()
+                        or self.var_getattr(tx, "_backward_pre_hooks").realize().len()
+                        or self.var_getattr(tx, "_forward_hooks").realize().len()
+                        or self.var_getattr(tx, "_forward_pre_hooks").realize().len()
+                        or globals_vt.var_getattr(
+                            tx, "_global_backward_pre_hooks"
+                        ).len()
+                        or globals_vt.var_getattr(tx, "_global_backward_hooks").len()
+                        or globals_vt.var_getattr(tx, "_global_forward_hooks").len()
+                        or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()
+                    ):
+                        name = "forward"
+                        fn = self.value_type.forward
+
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
         else:
@@ -863,8 +901,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .builder import VariableBuilder
-
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:

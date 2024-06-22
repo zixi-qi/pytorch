@@ -474,6 +474,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
+        self._cached_attrs = {}
         assert type(value) is self.value_type
 
     def __str__(self):
@@ -828,20 +829,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
+
+        if name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+
         self._check_for_getattribute()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        if name == "__dict__":
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, **options)
+        if name in self._cached_attrs:
+            # print("Found", self, id(self), name)
+            return self._cached_attrs[name]
+        # print("Searching", self, id(self), name)
 
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
+
             if isinstance(getattr_fn, types.FunctionType):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
@@ -872,33 +880,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         out.set_nn_module_stack_source(
                             AttrSource(self.get_nn_module_stack_source(), name)
                         )
+                self._cached_attrs[name] = out
                 return out
 
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
+        out = None
         if isinstance(subobj, property):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
                 # Get the getter function
                 source = AttrSource(source, "fget")
-            return variables.UserMethodVariable(
+            out = variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
         elif isinstance(subobj, torch.distributions.utils.lazy_property):
             subobj_var = UserDefinedObjectVariable(subobj, source=source)
-            return variables.UserMethodVariable(
+            out = variables.UserMethodVariable(
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
             if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
+                out = trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return trace_rules.lookup(func)(func)
+                out = trace_rules.lookup(func)(func)
         elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(
+            out = variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
         elif isinstance(subobj, types.FunctionType) or (
@@ -924,16 +934,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func = subobj
 
             if inspect.ismethod(dynamic_subobj):
-                return variables.UserMethodVariable(func, self, source=source)
+                out = variables.UserMethodVariable(func, self, source=source)
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
-                    return build_checkpoint_variable(source=source)
+                    out = build_checkpoint_variable(source=source)
                 elif source is not None:
-                    return trace_rules.lookup(func).create_with_source(
+                    out = trace_rules.lookup(func).create_with_source(
                         func, source=source
                     )
                 else:
-                    return trace_rules.lookup(func)(func)
+                    out = trace_rules.lookup(func)(func)
+
+        if out:
+            self._cached_attrs[name] = out
+            return out
 
         if (
             name in getattr(value, "__dict__", {})
@@ -948,9 +962,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
-                return variables.LazyVariableTracker.create(subobj, source)
+                out = variables.LazyVariableTracker.create(subobj, source)
             elif ConstantVariable.is_literal(subobj):
-                return ConstantVariable.create(subobj)
+                out = ConstantVariable.create(subobj)
             elif (
                 type(subobj) == torch.utils._pytree.TreeSpec
                 or type(subobj) == torch.utils._pytree.LeafSpec
@@ -958,7 +972,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 from .builder import SourcelessBuilder
 
-                return SourcelessBuilder.create(tx, subobj)
+                out = SourcelessBuilder.create(tx, subobj)
+
+        if out:
+            self._cached_attrs[name] = out
+            return out
 
         if (
             subobj is not NO_SUCH_SUBOBJ
