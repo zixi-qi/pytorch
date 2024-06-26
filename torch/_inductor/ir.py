@@ -49,7 +49,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
+from torch._subclasses.fake_tensor import extract_tensor_metadata, get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     compute_unbacked_bindings,
@@ -4282,6 +4282,11 @@ class ExternKernel(InputsKernel):
             r = pytree.tree_unflatten(result, args_spec)
             return r.get("args", []), r.get("kwargs", {})
 
+        out_arg_idx_list = []
+        if cls is FallbackKernel and "out" in kwargs:
+            out_flat, _ = pytree.tree_flatten(kwargs["out"])
+            out_arg_idx_list = [i for i, x in enumerate(tensor_args) if x in out_flat]
+
         tensor_args = [cls.realize_input(x) for x in tensor_args]
 
         # freeze layout otherwise our output stride calculation might
@@ -4306,8 +4311,21 @@ class ExternKernel(InputsKernel):
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
+        out_arg_metadata_pre_call = [
+            extract_tensor_metadata(example_args[idx]) for idx in out_arg_idx_list  # type: ignore[arg-type]
+        ]
+
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
+
+        out_arg_metadata_post_call = [
+            extract_tensor_metadata(example_args[idx]) for idx in out_arg_idx_list  # type: ignore[arg-type]
+        ]
+
+        assert all(
+            pre == post
+            for pre, post in zip(out_arg_metadata_pre_call, out_arg_metadata_post_call)
+        ), "out= op cannot mutate metadata of out arg"
 
         unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
@@ -5405,8 +5423,8 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: List[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: List[str] = []
+        # args that are mutated
+        self.mutable_args: List[IRNode] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -5436,7 +5454,26 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
+            self.mutable_args.append(tensor_args[0])
+            mark_node_as_mutating(self, tensor_args[0])
+            return
+
+        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+
+        def _mark_all_nodes_as_mutating(arg):
+            if isinstance(arg, (list, tuple)):
+                for a in arg:
+                    _mark_all_nodes_as_mutating(a)
+            elif isinstance(arg, Buffer):
+                self.mutable_args.append(arg)
+                mark_node_as_mutating(self, arg)
+            else:
+                raise NotImplementedError(
+                    f"NYI: Unsupported out= arg type: {type(arg)}"
+                )
+
+        if "out" in kwargs:
+            _mark_all_nodes_as_mutating(kwargs["out"])
             return
 
         if schema.is_mutable and not can_auto_functionalize(kernel):
@@ -5445,7 +5482,6 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         schema_args = schema.arguments
-        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg):
             # Assertions to make sure we didn't mismatch args
@@ -5609,11 +5645,13 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self):
-        return self.alias_names
+        return self.alias_names + [i.get_name() for i in self.mutable_args]
 
     def get_mutation_names(self):
-        assert len(self.mutation_names) <= 1
-        return self.mutation_names
+        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
+        # To get around that, we create MutationOutputs which marks their
+        # assigned input as mutable, thus, adhering to Inductor's constraint.
+        return []
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
