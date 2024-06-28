@@ -1608,6 +1608,7 @@ def run_tests(
         for test in selected_tests_serial:
             if test.shard not in (9, 3, 16):
                 print(f"skipping {test.shard} {test.name}")
+                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -1622,6 +1623,9 @@ def run_tests(
 
         # Run tests marked as serial first
         for test in selected_tests_parallel:
+            if test.shard not in (9, 3, 16):
+                print(f"skipping {test.shard} {test.name}")
+                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
