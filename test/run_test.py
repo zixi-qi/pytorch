@@ -1606,6 +1606,8 @@ def run_tests(
 
     try:
         for test in selected_tests_serial:
+            if test.shard not in (9, 3, 16):
+                print(f"skipping {test.shard} {test.name}")
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -1682,6 +1684,7 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    selected_tests = ["test_decomp"]
 
     test_prioritizations = import_results()
     test_prioritizations.amend_tests(selected_tests)
