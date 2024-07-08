@@ -507,6 +507,7 @@ def run_test(
         if is_cpp_test
         else None
     )
+    print_to_stderr(f"shoud_retry: {should_retry}, timeout: {timeout}")
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with ExitStack() as stack:
@@ -1606,9 +1607,6 @@ def run_tests(
 
     try:
         for test in selected_tests_serial:
-            if test.shard not in (9, 3, 16):
-                print(f"skipping {test.shard} {test.name}")
-                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -1623,9 +1621,6 @@ def run_tests(
 
         # Run tests marked as serial first
         for test in selected_tests_parallel:
-            if test.shard not in (9, 3, 16):
-                print(f"skipping {test.shard} {test.name}")
-                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -1641,9 +1636,6 @@ def run_tests(
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
-            if test.shard not in (9, 3, 16):
-                print(f"skipping {test.shard} {test.name}")
-                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
