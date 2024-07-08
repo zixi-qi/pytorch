@@ -893,6 +893,7 @@ def wait_for_process(p, timeout=None):
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
         exit_status = p.wait(timeout=5)
+        print("KeyboardInterrupt received. Terminating the process.")
         if exit_status is not None:
             return exit_status
         else:
@@ -900,13 +901,17 @@ def wait_for_process(p, timeout=None):
             raise
     except subprocess.TimeoutExpired:
         # send SIGINT to give pytest a chance to make xml
+        print("TimeoutExpired received. Sending SIGINT to the process.")
         p.send_signal(signal.SIGINT)
         exit_status = None
+        print(f"exit_status: {exit_status}")
         try:
             exit_status = p.wait(timeout=5)
+            print(f"exit_status: {exit_status}")
         # try to handle the case where p.wait(timeout=5) times out as well as
         # otherwise the wait() call in the finally block can potentially hang
         except subprocess.TimeoutExpired:
+            print("Another TimeoutExpired received. Passing.")
             pass
         if exit_status is not None:
             return exit_status
@@ -953,6 +958,7 @@ def retry_shell(
         exit_code = shell(
             command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout
         )
+        print(f"Got exit code {exit_code}", file=stdout, flush=True)
         if exit_code == 0 or retries == 0:
             return exit_code, was_rerun
         print(

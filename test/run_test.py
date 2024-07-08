@@ -602,6 +602,7 @@ def run_test_retries(
             timeout=timeout,
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
+        print(f"Got exit code {ret_code}")
         ret_code = 0 if ret_code == 5 else ret_code
         if ret_code == 0 and not sc_command.startswith("--rs="):
             break  # Got to the end of the test suite successfully
