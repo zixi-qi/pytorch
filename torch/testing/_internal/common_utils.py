@@ -923,7 +923,8 @@ def wait_for_process(p, timeout=None):
         raise
     finally:
         # Always call p.wait() to ensure exit
-        p.wait()
+        exit_status = p.wait()
+        print(f"exit_status: {exit_status}")
 
 def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     sys.stdout.flush()
