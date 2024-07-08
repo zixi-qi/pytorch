@@ -26,6 +26,7 @@ ADD common/install_cpython.sh install_cpython.sh
 RUN bash ./install_cpython.sh && rm install_cpython.sh
 
 FROM base as conda
+ENV ANACONDA_PYTHON_VERSION 3.11
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
 RUN /opt/conda/bin/conda install -y cmake
