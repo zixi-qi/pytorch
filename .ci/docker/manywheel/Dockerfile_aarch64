@@ -34,6 +34,7 @@ RUN yum install -y \
   less \
   zstd \
   libgomp \
+  sudo \
   devtoolset-${DEVTOOLSET_VERSION}-gcc \
   devtoolset-${DEVTOOLSET_VERSION}-gcc-c++ \
   devtoolset-${DEVTOOLSET_VERSION}-gcc-gfortran \

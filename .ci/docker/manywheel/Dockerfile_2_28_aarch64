@@ -35,6 +35,7 @@ RUN yum install -y \
   xz \
   yasm \
   zstd \
+  sudo \
   gcc-toolset-${GCCTOOLSET_VERSION}-toolchain
 
 # Ensure the expected devtoolset is used

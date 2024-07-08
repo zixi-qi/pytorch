@@ -33,6 +33,7 @@ RUN yum install -y \
   less \
   zstd \
   libgomp \
+  sudo \
   gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
 
 # Ensure the expected devtoolset is used
