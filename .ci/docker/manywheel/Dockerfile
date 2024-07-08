@@ -38,7 +38,7 @@ RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake
 
-RUN yum install -y autoconf aclocal automake make
+RUN yum install -y autoconf aclocal automake make sudo
 
 FROM base as openssl
 # Install openssl (this must precede `build python` step)
