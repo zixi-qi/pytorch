@@ -120,8 +120,7 @@ fi
         --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
         --target "${TARGET}" \
         -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
-        "${TOPDIR}"
-
+        "${TOPDIR}/.ci/docker/"
 )
 
 GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
