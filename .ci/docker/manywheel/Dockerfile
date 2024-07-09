@@ -182,6 +182,7 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 # find HIP works for ROCm5.7. Not needed for ROCm6.0 and above.
 # Remove below when ROCm5.7 is not in support matrix anymore.
 ENV ROCM_PATH /opt/rocm
+ENV MKLROOT /opt/intel
 # No need to install ROCm as base docker image should have full ROCm install
 #ADD ./common/install_rocm.sh install_rocm.sh
 #RUN ROCM_VERSION=${ROCM_VERSION} bash ./install_rocm.sh && rm install_rocm.sh
@@ -189,7 +190,7 @@ ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 # cmake3 is needed for the MIOpen build
 RUN ln -sf /usr/local/bin/cmake /usr/bin/cmake3
-ADD ./common/install_rocm_magma_docker.sh install_rocm_magma.sh
+ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh

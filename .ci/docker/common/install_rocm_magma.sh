@@ -2,6 +2,9 @@
 
 set -ex
 
+
+MKLROOT=${MKLROOT:-/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION}
+
 # "install" hipMAGMA into /opt/rocm/magma by copying after build
 git clone https://bitbucket.org/icl/magma.git
 pushd magma
@@ -25,7 +28,7 @@ done
 # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
 sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
 make -f make.gen.hipMAGMA -j $(nproc)
-LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION
-make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION
+LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT="${MKLROOT}"
+make testing/testing_dgemm -j $(nproc) MKLROOT="${MKLROOT}"
 popd
 mv magma /opt/rocm

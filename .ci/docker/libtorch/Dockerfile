@@ -77,7 +77,7 @@ ENV ROCM_PATH /opt/rocm
 # No need to install ROCm as base docker image should have full ROCm install
 #ADD ./common/install_rocm.sh install_rocm.sh
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
-ADD ./common/install_rocm_magma_docker.sh install_rocm_magma.sh
+ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 # gfortran and python needed for building magma from source for ROCm
 RUN apt-get update -y && \
     apt-get install gfortran -y && \
