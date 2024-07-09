@@ -544,12 +544,13 @@ def run_test(
             # this writing have been excluded and new ones should be added to
             # the list of exclusions in tools/testing/discover_tests.py
             ret_code = 0 if ret_code == 5 else ret_code
+            print(f"Test {test_module} finished with exit code {ret_code}", flush=True)
 
     if options.pipe_logs and print_log:
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
-    print(f"Test {test_module} finished with exit code {ret_code}")
+    print(f"Test {test_module} finished with exit code {ret_code}", flush=True)
     return ret_code
 
 
@@ -603,12 +604,12 @@ def run_test_retries(
             timeout=timeout,
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
-        print(f"Got exit code {ret_code}")
+        print_to_file(f"Got exit code {ret_code} for {stepcurrent_key}")
         ret_code = 0 if ret_code == 5 else ret_code
+        print_to_file(f"Got exit code {ret_code} for {stepcurrent_key}")
+        print_to_file(SIGNALS_TO_NAMES_DICT)
         if ret_code == 0 and not sc_command.startswith("--rs="):
             break  # Got to the end of the test suite successfully
-        print(f"Got exit code {ret_code}")
-        print(SIGNALS_TO_NAMES_DICT)
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
 
