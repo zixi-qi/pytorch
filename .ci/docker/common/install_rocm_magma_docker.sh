@@ -44,4 +44,3 @@ mkdir -p /opt/rocm/magma
 mv magma/include /opt/rocm/magma
 mv magma/lib /opt/rocm/magma
 rm -rf magma
-
