@@ -195,6 +195,7 @@ ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
 # Install AOTriton
+COPY ./common/common_utils.sh common_utils.sh
 COPY ./common/aotriton_version.txt aotriton_version.txt
 COPY ./common/install_aotriton.sh install_aotriton.sh
 RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
