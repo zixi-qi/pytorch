@@ -914,6 +914,7 @@ def wait_for_process(p, timeout=None):
             print("Another TimeoutExpired received. Passing.")
             pass
         if exit_status is not None:
+            print(f"exit_status1: {exit_status}")
             return exit_status
         else:
             p.kill()
@@ -924,7 +925,7 @@ def wait_for_process(p, timeout=None):
     finally:
         # Always call p.wait() to ensure exit
         exit_status = p.wait()
-        print(f"exit_status: {exit_status}")
+        print(f"exit_status2: {exit_status}")
 
 def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     sys.stdout.flush()

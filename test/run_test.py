@@ -549,6 +549,7 @@ def run_test(
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
+    print(f"Test {test_module} finished with exit code {ret_code}")
     return ret_code
 
 
@@ -606,6 +607,8 @@ def run_test_retries(
         ret_code = 0 if ret_code == 5 else ret_code
         if ret_code == 0 and not sc_command.startswith("--rs="):
             break  # Got to the end of the test suite successfully
+        print(f"Got exit code {ret_code}")
+        print(SIGNALS_TO_NAMES_DICT)
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
 
