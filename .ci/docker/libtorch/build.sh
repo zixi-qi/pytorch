@@ -59,6 +59,7 @@ DOCKER_IMAGE=pytorch/libtorch-cxx11-builder:${DOCKER_TAG}
         --target final \
         -f "${TOPDIR}/.ci/docker/libtorch/Dockerfile" \
         "${TOPDIR}/.ci/docker/"
+
 )
 
 GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}

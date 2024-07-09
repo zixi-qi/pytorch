@@ -28,6 +28,10 @@ env:
   DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
 jobs:
   build-docker-cuda:
     runs-on: linux.12xlarge

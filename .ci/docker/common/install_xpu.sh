@@ -15,7 +15,6 @@ function install_ubuntu() {
 
     apt-get update -y
     apt-get install -y gpg-agent wget
-    
     # To add the online network package repository for the GPU Driver LTS releases
     wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
         | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
@@ -71,7 +70,6 @@ function install_rhel() {
     # To add the online network package repository for the GPU Driver LTS releases
     dnf config-manager --add-repo \
         https://repositories.intel.com/gpu/rhel/${VERSION_ID}/lts/2350/unified/intel-gpu-${VERSION_ID}.repo
-    
     # To add the online network network package repository for the Intel Support Packages
     tee > /etc/yum.repos.d/intel-for-pytorch-gpu-dev.repo << EOF
 [intel-for-pytorch-gpu-dev]
