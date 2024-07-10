@@ -4,7 +4,7 @@ set -ex
 # MKL
 MKL_VERSION=2024.2.0
 
-MKLROOT=${MKLROOT:-/opt/intel}
+MKLROOT=/opt/intel
 mkdir -p ${MKLROOT}
 pushd /tmp
 
