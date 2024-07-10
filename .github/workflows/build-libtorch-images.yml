@@ -44,14 +44,25 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
         with:
           submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: libtorch-cxx11-builder-cuda${{matrix.cuda_version}}
+            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            docker-build-dir:  .ci/docker/libtorch
+            always-rebuild: true
+            push: true
       - name: Authenticate if WITH_PUSH
+        if: false
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
           fi
       - name: Build Docker Image
+        if: false
         run: |
-          .ci/docker/libtorch/build.sh
+          .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
   build-docker-rocm:
     runs-on: linux.12xlarge
     strategy:
@@ -65,14 +76,25 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
         with:
           submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: libtorch-cxx11-builder-rocm${{matrix.rocm_version}}
+            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            docker-build-dir:  .ci/docker/libtorch
+            always-rebuild: true
+            push: true
       - name: Authenticate if WITH_PUSH
+        if: false
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
           fi
       - name: Build Docker Image
+        if: false
         run: |
-          .ci/docker/libtorch/build.sh
+          .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
     runs-on: ubuntu-22.04
     steps:
@@ -80,11 +102,22 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
         with:
           submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: libtorch-cxx11-builder-cpu
+            working-directory: /home/ec2-user/actions-runner/_work/pytorch/pytorch/
+            docker-build-dir:  .ci/docker/libtorch
+            always-rebuild: true
+            push: true
       - name: Authenticate if WITH_PUSH
+        if: false
         run: |
           if [[ "${WITH_PUSH}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
           fi
       - name: Build Docker Image
+        if: false
         run: |
-          .ci/docker/libtorch/build.sh
+          .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cpu

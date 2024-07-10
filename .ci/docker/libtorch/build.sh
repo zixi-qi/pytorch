@@ -2,6 +2,16 @@
 
 set -eou pipefail
 
+image="$1"
+shift
+
+if [ -z "${image}" ]; then
+  echo "Usage: $0 IMAGE"
+  exit 1
+fi
+
+DOCKER_IMAGE="pytorch/${image}"
+
 TOPDIR=$(git rev-parse --show-toplevel)
 
 GPU_ARCH_TYPE=${GPU_ARCH_TYPE:-cpu}
@@ -47,7 +57,6 @@ case ${GPU_ARCH_TYPE} in
         ;;
 esac
 
-DOCKER_IMAGE=pytorch/libtorch-cxx11-builder:${DOCKER_TAG}
 
 (
     set -x
@@ -68,26 +77,15 @@ GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
 DOCKER_IMAGE_BRANCH_TAG=${DOCKER_IMAGE}-${GIT_BRANCH_NAME}
 DOCKER_IMAGE_SHA_TAG=${DOCKER_IMAGE}-${GIT_COMMIT_SHA}
 
-if [[ -n ${GITHUB_REF} ]]; then
-    ${DOCKER} tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_BRANCH_TAG}
-    ${DOCKER} tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
-fi
-
 if [[ "${WITH_PUSH}" == true ]]; then
   (
     set -x
     ${DOCKER} push "${DOCKER_IMAGE}"
     if [[ -n ${GITHUB_REF} ]]; then
+        ${DOCKER} tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_BRANCH_TAG}
+        ${DOCKER} tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
         ${DOCKER} push "${DOCKER_IMAGE_BRANCH_TAG}"
         ${DOCKER} push "${DOCKER_IMAGE_SHA_TAG}"
     fi
   )
-  # For legacy .circleci/config.yml generation scripts
-  if [[ "${GPU_ARCH_TYPE}" != "cpu" ]]; then
-    (
-      set -x
-      ${DOCKER} tag ${DOCKER_IMAGE} pytorch/libtorch-cxx11-builder:${DOCKER_TAG/./}
-      ${DOCKER} push pytorch/libtorch-cxx11-builder:${DOCKER_TAG/./}
-    )
-  fi
 fi
