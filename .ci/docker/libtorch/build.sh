@@ -61,11 +61,12 @@ esac
 (
     set -x
     DOCKER_BUILDKIT=1 ${DOCKER} build \
-        -t "${DOCKER_IMAGE}" \
+         --target final \
         ${DOCKER_GPU_BUILD_ARG} \
         --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
         --build-arg "BASE_TARGET=${BASE_TARGET}" \
-        --target final \
+        -t "${DOCKER_IMAGE}" \
+        $@ \
         -f "${TOPDIR}/.ci/docker/libtorch/Dockerfile" \
         "${TOPDIR}/.ci/docker/"
 
