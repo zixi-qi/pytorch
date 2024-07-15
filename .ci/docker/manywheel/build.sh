@@ -4,6 +4,16 @@ set -eou pipefail
 
 TOPDIR=$(git rev-parse --show-toplevel)
 
+image="$1"
+shift
+
+if [ -z "${image}" ]; then
+  echo "Usage: $0 IMAGE"
+  exit 1
+fi
+
+DOCKER_IMAGE="pytorch/${image}"
+
 DOCKER_REGISTRY="${DOCKER_REGISTRY:-docker.io}"
 
 GPU_ARCH_TYPE=${GPU_ARCH_TYPE:-cpu}
@@ -107,18 +117,18 @@ case ${GPU_ARCH_TYPE} in
 esac
 
 IMAGES=''
-DOCKER_NAME=manylinux${MANY_LINUX_VERSION}
-DOCKER_IMAGE=${DOCKER_REGISTRY}/pytorch/${DOCKER_NAME}-builder:${DOCKER_TAG}
+
 if [[ -n ${MANY_LINUX_VERSION} && -z ${DOCKERFILE_SUFFIX} ]]; then
     DOCKERFILE_SUFFIX=_${MANY_LINUX_VERSION}
 fi
 (
     set -x
     DOCKER_BUILDKIT=1 docker build \
-        -t "${DOCKER_IMAGE}" \
         ${DOCKER_GPU_BUILD_ARG} \
         --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
         --target "${TARGET}" \
+        -t "${DOCKER_IMAGE}" \
+        $@ \
         -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
         "${TOPDIR}/.ci/docker/"
 )
@@ -129,19 +139,13 @@ GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
 DOCKER_IMAGE_BRANCH_TAG=${DOCKER_IMAGE}-${GIT_BRANCH_NAME}
 DOCKER_IMAGE_SHA_TAG=${DOCKER_IMAGE}-${GIT_COMMIT_SHA}
 
-(
-    set -x
-    if [[ -n ${GITHUB_REF} ]]; then
-        docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_BRANCH_TAG}
-        docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
-    fi
-)
-
 if [[ "${WITH_PUSH}" == true ]]; then
     (
         set -x
         docker push "${DOCKER_IMAGE}"
         if [[ -n ${GITHUB_REF} ]]; then
+            docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_BRANCH_TAG}
+            docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
             docker push "${DOCKER_IMAGE_BRANCH_TAG}"
             docker push "${DOCKER_IMAGE_SHA_TAG}"
         fi
