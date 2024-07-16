@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from typing import Any, Callable, cast, List, Optional, Union
+from functools import lru_cache
 
 import torch
 import torch.utils
@@ -125,7 +126,7 @@ GEMM_TEMPLATE = r"""
                     int64_t k_start = kc * K0;
                     int64_t k_end = std::min((kc + Kc_blocks) * K0, K);
                     {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
-                    {%- if should_pack_weights %}
+                    {%- if template.should_pack_weights %}
                     {%- set tile_W_3d = kernel.slice_nd(W, [("nc", "nc + 1"), ("k_start", "k_end"), ()]) %}
                     {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                     {%- else %}
@@ -139,8 +140,6 @@ GEMM_TEMPLATE = r"""
                     } else {
                         {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(24, false) }}
                     }
-                    {%- endif %}
-                    {%- if use_local_acc %}
                     {%- endif %}
 
                 }
@@ -187,14 +186,17 @@ class CppPackedGemmTemplate(CppTemplate):
         self.m, self.n, self.k = m, n, k
         self.is_dynamic_M = has_free_symbols((m,))
         self.should_pack_weights = True
+        self.thread_blocking = self.make_thread_blocking_cache()
 
-    def thread_blocking(self, num_threads=None, reset_cache=False) -> GemmBlocking:
-        if hasattr(self, "_thread_blocking_cache") and not reset_cache:
-            thread_count, cache = self._thread_blocking_cache
-            if thread_count == num_threads:
-                return cache
-        if num_threads is None:
-            num_threads = self.num_threads
+    def make_thread_blocking_cache(self):
+        cache = lru_cache()(self._thread_blocking)
+
+        def thread_blocking(num_threads: int) -> GemmBlocking:
+            return cache(num_threads)
+
+        return thread_blocking
+
+    def _thread_blocking(self, num_threads: int) -> GemmBlocking:
         # TODO(jgong5): allow tuning various blocking options
         def get_factors(number):
             factors = []
@@ -220,27 +222,24 @@ class CppPackedGemmTemplate(CppTemplate):
         k_blocks = (self.k + register_blocking.block_k - 1) // register_blocking.block_k
         factors = get_factors(num_threads)
         assert len(factors) > 0
-        blocking = None
         for factor in factors:
             if n_blocks % factor == 0 and m_blocks % (num_threads // factor) == 0:
-                blocking = get_blocking(
+                return get_blocking(
                     num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
         for factor in factors:
             if n_blocks % factor == 0:
-                blocking = get_blocking(
+                return get_blocking(
                     num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
             cofactor = num_threads // factor
             if m_blocks % cofactor == 0:
-                blocking = get_blocking(
+                return get_blocking(
                     num_threads, factor, m_blocks, n_blocks, k_blocks
                 )
-        self._thread_blocking_cache = (num_threads, blocking)
-        assert blocking is not None
-        return blocking
+        raise AssertionError("Should not reach here.")
 
-    def cache_blocking(self, num_threads=None) -> GemmBlocking:
+    def cache_blocking(self, num_threads) -> GemmBlocking:
         # TODO(jgong5): improve cache blocking with CPU info
         assert (
             not self.is_dynamic_M
@@ -262,6 +261,7 @@ class CppPackedGemmTemplate(CppTemplate):
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
+        ### MAKE something where if the index matches, then you change input indices to match? Something like that.
 
         def reorder_and_filter(inputs, layout_or_out):
             if has_bias:
@@ -614,7 +614,6 @@ class CppPackedGemmTemplate(CppTemplate):
             num_threads=self.num_threads,
             micro_gemm=micro_gemm,
             is_dynamic_M=self.is_dynamic_M,
-            should_pack_weights=self.should_pack_weights,
             template=self,
             kernel=kernel,
             epilogue_nodes=epilogues,
