@@ -51,7 +51,6 @@ ISORT_WHITELIST = re.compile(
                     # test/j*/**
                     "test/j*/**",
                     # test/[k-p]*/**
-                    "test/[k-p]*/**",
                     # test/[q-z]*/**
                     "test/[q-z]*/**",
                     # torch/**
