@@ -43,7 +43,6 @@ ISORT_WHITELIST = re.compile(
                     # test/d*/**
                     "test/d*/**",
                     # test/dy*/**
-                    "test/dy*/**",
                     # test/[e-h]*/**
                     "test/[e-h]*/**",
                     # test/i*/**
