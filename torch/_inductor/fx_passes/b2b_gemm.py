@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+
 from ..._dynamo.utils import counters
 from ..ir import FixedLayout
 from ..pattern_matcher import (
@@ -15,6 +16,7 @@ from ..select_algorithm import (
     TritonTemplateCaller,
 )
 from ..utils import ceildiv
+
 
 aten = torch.ops.aten
 
