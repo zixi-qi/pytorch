@@ -531,6 +531,9 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in nanoseconds (ns)
         """
+        if isinstance(self, GroupedSchedulerNode):
+            return sum(snode.get_estimated_runtime() for snode in self.snodes)
+
         layout = None
         dtype = None
         if not hasattr(self, "node") or not self.node:
@@ -899,12 +902,16 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
 
-def init_group_node(
+def is_group_snode(snode: BaseSchedulerNode):
+    return isinstance(snode, (FusedSchedulerNode, GroupedSchedulerNode))
+
+
+def init_group_snode(
     group_snode: BaseSchedulerNode,
     scheduler: Scheduler,
     snodes: List[BaseSchedulerNode],
 ) -> None:
-    assert isinstance(group_snode, (FusedSchedulerNode, GroupedSchedulerNode))
+    assert is_group_snode(group_snode)
     group_snode.snodes = snodes
     group_snode.scheduler = scheduler
     group_snode.node = None
@@ -947,7 +954,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_node(self, scheduler, snodes)
+        init_group_snode(self, scheduler, snodes)
         self.users: List[NodeUser] = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
 
@@ -1325,7 +1332,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        init_group_node(self, scheduler, snodes)
+        init_group_snode(self, scheduler, snodes)
 
     def unpack(self) -> List[BaseSchedulerNode]:
         """
@@ -1343,6 +1350,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def get_first_name(self) -> str:
         return self.snodes[0].get_name()
+
+    @cache_on_self
+    def get_names(self) -> Set[str]:
+        return set.union(*[x.get_names() for x in self.snodes])
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -1494,7 +1505,11 @@ class Scheduler:
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
         if config._pre_fusion_custom_pass is not None:
-            self.nodes = config._pre_fusion_custom_pass(self.nodes)
+            self.nodes = config._pre_fusion_custom_pass(
+                self.nodes,
+                name_to_fused_node=self.name_to_fused_node,
+                graph_inputs=V.graph.graph_inputs,
+            )
         self.nodes = self.fuse_nodes(self.nodes)
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:

@@ -165,6 +165,12 @@ class TestFullyShardCompile(FSDPTest):
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._functorch.config.patch(recompute_views=True)
     @torch._functorch.config.patch(cse=False)
+    @torch._inductor.config.patch(
+        # reorder_for_compute_comm_overlap=True,
+        # reorder_for_compute_comm_overlap_passes=["sink_waits", "raise_comms"],
+        _pre_fusion_custom_pass=comms.enforce_comm_ordering_for_fsdp,
+        reorder_for_locality=False,
+    )
     def _test_traceable_fsdp(
         self, model_init_fn, input_creation_fn, backend, fullgraph
     ):
@@ -305,15 +311,15 @@ class TestFullyShardCompile(FSDPTest):
                     x = layer(x)
                 for layer in self.layers:
                     x = layer(x)
-                for layer in self.layers:
-                    x = layer(x)
+                # for layer in self.layers:
+                #     x = layer(x)
                 return x
 
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model = TestModule(n_layers=3)
+            model = TestModule(n_layers=2)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
@@ -349,11 +355,29 @@ class TestFullyShardCompile(FSDPTest):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_nested_fully_shard_fullgraph_backend_inductor(self):
-        self._test_traceable_fsdp(
-            *self._create_nested_fully_shard_factory_fns(),
-            "inductor",
-            fullgraph=True,
+        with mock.patch.object(
+            comms,
+            "reinplace_fsdp_all_gather",
+            functools.partial(
+                self._reinplace_all_gather_with_checks,
+                orig_fn=comms.reinplace_fsdp_all_gather,
+            ),
+        ):
+            _, triton_codes = run_and_get_code(
+                lambda: self._test_traceable_fsdp(
+                    *self._create_nested_fully_shard_factory_fns(),
+                    "inductor",
+                    fullgraph=True,
+                )
+            )
+        self.assertTrue(
+            len(triton_codes) == 2,
+            "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
         )
+        for code in triton_codes:
+            FileCheck().check(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out."
+            ).run(code)
 
     def _create_transformer_factory_fns(self):
         seq_len = 16
@@ -363,7 +387,10 @@ class TestFullyShardCompile(FSDPTest):
             torch.manual_seed(self.rank)
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
-            model_args = ModelArgs(vocab_size=vocab_size)
+            model_args = ModelArgs(
+                vocab_size=vocab_size,
+                n_layers=3,
+            )
             model = Transformer(model_args)
             for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
