@@ -841,7 +841,7 @@ class TS2FXGraphConverter:
         # breaks, continues, and returns.
         # So we add a dummy constant to the graph.
         output_name = node.output().debugName()
-        self.constant_map[output_name] = torch.Tensor()
+        self.name_to_constant[output_name] = torch.Tensor()
 
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
