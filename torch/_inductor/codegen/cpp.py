@@ -17,15 +17,15 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -123,9 +123,6 @@ DTYPE_LOWP_FP = [
     torch.bfloat16,
     torch.float16,
 ]
-
-
-BIN_CMP_OPS = ["eq", "ne", "le", "ge", "lt", "gt"]
 
 
 def reduction_init(reduction_type, dtype):
@@ -3025,61 +3022,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def index_expr(expr, dtype):
-                assert len(self.ranges) == len(self.itervars)
-
-                def can_use_int32():
-                    free_symbols = list(expr.free_symbols)
-                    sizes = {
-                        k: v
-                        for k, v in zip(self.itervars, self.ranges)
-                        if k in free_symbols
-                    }
-                    # Trivial case: Range empty
-                    if any(v == 0 for v in sizes.values()):
-                        return True
-
-                    vars_ranges = {
-                        k: ValueRanges(0, v - 1)
-                        for k, v in sizes.items()
-                        if not isinstance(v, sympy.Expr) or v.is_number
-                    }
-                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
-                        i32_iinfo = torch.iinfo(torch.int32)
-                        return (
-                            expr.is_number
-                            and expr <= i32_iinfo.max
-                            and expr >= i32_iinfo.min
-                        )
-                    expr_ranges = bound_sympy(expr, vars_ranges)
-                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):  # type: ignore[arg-type]
-                        return False
-                    # If something takes the values 0..7, we will compare in the loop
-                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
-                    # to check that expr_ranges.upper + 1 is representable as well
-                    return range_expressable_in_32_bits(
-                        ValueRanges(
-                            int(expr_ranges.lower), int(expr_ranges.upper) + 1  # type: ignore[arg-type]
-                        )
-                    )
-
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    assert len(self.ranges) == len(self.itervars)
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    if (
-                        dtype == torch.int64
-                        and can_use_int32()
-                        and all(
-                            user.target in BIN_CMP_OPS
-                            for user in node_ctx.current_node.users
-                        )
-                    ):
-                        opt_ctx.dtype = torch.int32
-                    else:
-                        self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
-
-                    tmp_var = self.cse.newvar()
-                    return tmp_var
+                return self.cse.newvar()
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
@@ -3235,6 +3178,116 @@ class TilingSelect:
             fn_list, var_sizes_list, tiling_factor
         )
         if tiling_indices:
+            if not config.cpp.disable_tiling_select_heuristic_flag:
+
+                def _try_get_stride(
+                    index,
+                    tiling_factor,
+                    tiling_indices,
+                ):
+                    assert len(tiling_indices) == 1, "Doesn't support Tile2D yet."
+                    free_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+                    if len(free_symbols) <= 0 or tiling_indices[0] > (
+                        len(free_symbols) - 1
+                    ):
+                        return None
+                    itervar = free_symbols[tiling_indices[0]]
+                    try:
+                        return stride_at_vec_range(index, itervar, tiling_factor)
+                    except Exception:
+                        # see test_torchinductor.py::test_full_boolean which has
+                        # tmp0 = ops.index_expr(s0 >= 1024, torch.bool)
+                        return None
+
+                def _update_negative_op_count(node_name, negative_op_type_count):
+                    if node_name not in negative_op_type_count:
+                        negative_op_type_count[node_name] = 1
+                    else:
+                        negative_op_type_count[node_name] += 1
+
+                group, reduction_group = max(
+                    var_sizes_list, key=lambda sizes: len(sizes[1])
+                )
+                op_type_count: Dict[str, int] = {}
+                # ops may not cause overhead with vectorization, like non-contiguous
+                # index_expr, load, store
+                negative_op_type_count: Dict[str, int] = {}
+
+                for _body in loop_bodies:
+                    sub_blocks = [_body.root_block] + list(_body.subblocks.values())
+                    for sub_block in sub_blocks:
+                        for _node in sub_block.graph.nodes:
+                            if _node.target == "index_expr":
+                                index = sub_block.body.indexing_exprs[
+                                    _node.args[-2].args[0]
+                                ]
+                                if len(tiling_indices) == 1:
+                                    stride = _try_get_stride(
+                                        index, tiling_factor, tiling_indices
+                                    )
+                                    if stride is not None and not stride.is_number:
+                                        _update_negative_op_count(
+                                            _node.target, negative_op_type_count
+                                        )
+                            elif _node.target == "load":
+                                index = sub_block.body.indexing_exprs[
+                                    _node.args[-1].args[0]
+                                ]
+                                if len(tiling_indices) == 1:
+                                    stride = _try_get_stride(
+                                        index, tiling_factor, tiling_indices
+                                    )
+                                    if stride is not None and stride not in [0, 1]:
+                                        _update_negative_op_count(
+                                            _node.target, negative_op_type_count
+                                        )
+                            elif _node.target == "store":
+                                index = sub_block.body.indexing_exprs[
+                                    _node.args[2].args[0]
+                                ]
+                                if len(tiling_indices) == 1:
+                                    stride = _try_get_stride(
+                                        index, tiling_factor, tiling_indices
+                                    )
+                                    if stride is not None and stride != 1:
+                                        _update_negative_op_count(
+                                            _node.target, negative_op_type_count
+                                        )
+
+                            if isinstance(_node.target, str) and not (
+                                _node.target.startswith("masked_subblock")
+                                or _node.target
+                                in ["ops", "output", "constant", "get_index"]
+                            ):
+                                if _node.target not in op_type_count:
+                                    op_type_count[_node.target] = 1
+                                else:
+                                    op_type_count[_node.target] += 1
+
+                total_op_count = sum(op_type_count.values())
+                negative_op_count = sum(negative_op_type_count.values())
+                threshold = 0.03
+                if (
+                    total_op_count > 0
+                    and negative_op_count / total_op_count >= threshold
+                ):
+                    # Too many non-contiguous load/store/index_expr which hurts the
+                    # vectorization performance. Disable vectorization when exceeding
+                    # the threshold.
+                    return [], []
+
+                if (
+                    not reduction_group
+                    and group
+                    and not has_free_symbols(group[-1])
+                    and group[-1] < tiling_factor / 2
+                ):
+                    # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
+                    # the inner dim doesn't have enough elements to do vectorization
+                    # explicitly. Found that `#pragma GCC ivdep` has better performance than
+                    # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
+                    return [], []
+
             if len(tiling_indices) == 1:
                 return [tiling_factor], tiling_indices
             if len(tiling_indices) == 2:
