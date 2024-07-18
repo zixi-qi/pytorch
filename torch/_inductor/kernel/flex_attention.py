@@ -7,13 +7,13 @@ from typing import Any, Dict, List, Tuple
 import sympy
 
 import torch
-from torch._inductor.virtualized import V
-from torch.utils._pytree import tree_map
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristic, GlobalFeedback
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
     context_add_strides,
 )
+from torch._inductor.virtualized import V
+from torch.utils._pytree import tree_map
 from .. import config
 from ..ir import (
     ComputedBuffer,
@@ -715,7 +715,7 @@ def flex_attention(
 
     if config.run_autoheuristic("flex_attention"):
 
-        def get_context(query, key, value):
+        def get_context(query, key, value, subgraph):
             context = AHContext()
             b, h, m, n = query.get_size()
             context.add_feature("b", b)
@@ -724,6 +724,17 @@ def flex_attention(
             context.add_feature("n", n)
             context.add_feature("dtype", query.get_dtype(), is_categorical=True)
             context_add_strides(context, "q", query.get_stride())
+            context.add_feature(
+                "subgraph_num_nodes", len(subgraph.graph_module.graph.nodes)
+            )
+
+            def arg_is_used(node):
+                return node.op == "placeholder" and len(node.users) > 0
+
+            num_args_used = sum(
+                1 for node in subgraph.graph_module.graph.nodes if arg_is_used(node)
+            )
+            context.add_feature("subgraph_num_args_used", num_args_used)
             return context
 
         def fallback():
@@ -734,7 +745,7 @@ def flex_attention(
             choicestr2choice[choice.autoheuristic_id()] = choice
         choices_str = list(choicestr2choice.keys())
         feedback = GlobalFeedback(inputs=inputs_for_autotuning, choices=choices)
-        context = get_context(query, key, value)
+        context = get_context(query, key, value, subgraph)
         autoheuristic = AutoHeuristic(
             fallback=fallback,
             choices=choices_str,

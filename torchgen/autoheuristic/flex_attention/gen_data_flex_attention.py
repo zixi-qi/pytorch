@@ -2,11 +2,12 @@
 import os
 import random
 import sys
+import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from functools import partial
-from typing import Any, Tuple
+from typing import Any, Callable, List, Tuple
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 
@@ -19,6 +20,27 @@ from torch.nn.attention.flex_attention import flex_attention
 class BenchmarkRunnerFlexAttention(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
     def __init__(self) -> None:
         super().__init__("flex_attention")
+
+    def generate_score_mods(self, score_mods: List[str]) -> List[Callable]:
+        def noop(score, b, h, m, n):
+            return score
+
+        def causal_mask(score, b, h, token_q, token_kv):
+            return torch.where(token_q >= token_kv, score, float("-inf"))
+
+        def relative_bias(score, b, h, m, n):
+            return score + (m - n)
+
+        def head_bias(score, b, h, m, n):
+            return score + 2 * h
+
+        function_dict = {
+            "noop": noop,
+            "causal": causal_mask,
+            "rel": relative_bias,
+            "head_bias": head_bias,
+        }
+        return [function_dict[name] for name in score_mods]
 
     def random_multiple(self, multiple, min_num=7, max_num=17):
         ran_pow2 = random.randint(min_num, max_num - 1)
@@ -128,15 +150,18 @@ class BenchmarkRunnerFlexAttention(BenchmarkRunner):  # type: ignore[misc, no-an
             requires_grad,
         )
 
-        def noop(score, b, h, m, n):
-            return score
-
-        with fresh_inductor_cache():
-            compiled_sdpa = torch.compile(
-                flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
-            )
-            compiled_sdpa(query, key, value)
-            torch.compiler.reset()
+        for score_mod in self.generate_score_mods(
+            ["noop", "causal", "rel", "head_bias"]
+        ):
+            start_time = time.time()
+            with fresh_inductor_cache():
+                compiled_sdpa = torch.compile(
+                    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
+                )
+                compiled_sdpa(query, key, value, score_mod)
+                torch.compiler.reset()
+            end_time = time.time()
+            print(f"{end_time - start_time} seconds")
 
 
 if __name__ == "__main__":
